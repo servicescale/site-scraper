@@ -27,10 +27,29 @@ export default async function handler(req, res) {
       x: 'x.com'
     };
 
-    // Raw HTML
     const rawHtml = $.html();
 
-    // Text blocks
+    // ✅ Restored image logic
+    $('img').each((_, el) => {
+      const src = $(el).attr('src') || $(el).attr('data-src');
+      if (src) {
+        try {
+          images.add(new URL(src, base).href);
+        } catch {}
+      }
+    });
+
+    $('[style*="background-image"]').each((_, el) => {
+      const style = $(el).attr('style') || '';
+      const match = /url\(['"]?([^"')]+)['"]?\)/i.exec(style);
+      if (match && match[1]) {
+        try {
+          images.add(new URL(match[1], base).href);
+        } catch {}
+      }
+    });
+
+    // Text content by tag
     $('h1,h2,h3,h4,h5,h6,p,li').each((_, el) => {
       const tag = el.tagName;
       const content = $(el).text().trim();
@@ -39,42 +58,7 @@ export default async function handler(req, res) {
       }
     });
 
-    // Images from tags
-    $('img, source').each((_, el) => {
-      const candidates = [
-        $(el).attr('src'),
-        $(el).attr('data-src'),
-        $(el).attr('data-srcset'),
-        $(el).attr('srcset')
-      ];
-      candidates.forEach(raw => {
-        if (!raw) return;
-        raw.split(',').forEach(s => {
-          const path = s.trim().split(' ')[0];
-          try {
-            if (path && /\.(jpe?g|png|webp|svg|gif)/i.test(path)) {
-              images.add(new URL(path, base).href);
-            }
-          } catch {}
-        });
-      });
-    });
-
-    // Background images from inline style
-    $('[style*="background"]').each((_, el) => {
-      const style = $(el).attr('style') || '';
-      const match = /url\(['"]?([^"')]+)['"]?\)/i.exec(style);
-      if (match && match[1]) {
-        try {
-          const url = match[1].trim();
-          if (/\.(jpe?g|png|webp|svg|gif)/i.test(url)) {
-            images.add(new URL(url, base).href);
-          }
-        } catch {}
-      }
-    });
-
-    // All links
+    // All links + social detection
     $('a').each((_, el) => {
       const href = $(el).attr('href');
       if (href) {
@@ -90,7 +74,7 @@ export default async function handler(req, res) {
       }
     });
 
-    // Inline CSS color tokens
+    // Inline style color tokens
     $('[style]').each((_, el) => {
       const style = $(el).attr('style') || '';
       for (const match of style.matchAll(/#[a-f0-9]{3,6}/gi)) {
@@ -98,7 +82,7 @@ export default async function handler(req, res) {
       }
     });
 
-    // Linked stylesheets
+    // Linked CSS files → fetch & scan for colors
     const cssPromises = [];
     $('link[rel="stylesheet"]').each((_, el) => {
       const href = $(el).attr('href');
