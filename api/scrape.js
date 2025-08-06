@@ -29,7 +29,7 @@ export default async function handler(req, res) {
 
     const rawHtml = $.html();
 
-    // ✅ Restored image logic
+    // ✅ Extract images
     $('img').each((_, el) => {
       const src = $(el).attr('src') || $(el).attr('data-src');
       if (src) {
@@ -49,7 +49,7 @@ export default async function handler(req, res) {
       }
     });
 
-    // Text content by tag
+    // ✅ Extract text content
     $('h1,h2,h3,h4,h5,h6,p,li').each((_, el) => {
       const tag = el.tagName;
       const content = $(el).text().trim();
@@ -58,7 +58,7 @@ export default async function handler(req, res) {
       }
     });
 
-    // All links + social detection
+    // ✅ Extract all links and social profiles
     $('a').each((_, el) => {
       const href = $(el).attr('href');
       if (href) {
@@ -74,7 +74,7 @@ export default async function handler(req, res) {
       }
     });
 
-    // Inline style color tokens
+    // ✅ Extract CSS colors from inline styles
     $('[style]').each((_, el) => {
       const style = $(el).attr('style') || '';
       for (const match of style.matchAll(/#[a-f0-9]{3,6}/gi)) {
@@ -82,7 +82,7 @@ export default async function handler(req, res) {
       }
     });
 
-    // Linked CSS files → fetch & scan for colors
+    // ✅ Extract CSS colors from external stylesheets
     const cssPromises = [];
     $('link[rel="stylesheet"]').each((_, el) => {
       const href = $(el).attr('href');
@@ -101,6 +101,7 @@ export default async function handler(req, res) {
       }
     });
 
+    // ✅ Return LLM-ready structured output
     res.status(200).json({
       html: rawHtml,
       images: Array.from(images),
