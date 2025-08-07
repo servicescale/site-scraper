@@ -1,5 +1,3 @@
-const fetch = require('node-fetch');
-
 module.exports = async function handler(req, res) {
   const startUrl = req.query.url;
   if (!startUrl || !/^https?:\/\//i.test(startUrl)) {
@@ -28,14 +26,16 @@ module.exports = async function handler(req, res) {
     social_links = { ...social_links, ...root.social_links };
     menu_links = root.menu_links.filter(link => link.startsWith(startUrl));
 
-    // Try to infer a business name from homepage title or H1
-    const guess = root.page.title || root.page.headings?.[0];
+    // Check for ABN in page content
+    const abnMatch = root.html.match(/\b\d{2}[ ]?\d{3}[ ]?\d{3}[ ]?\d{3}\b/);
+    const guess = abnMatch ? abnMatch[0].replace(/\s+/g, '') : (root.page.title || root.page.headings?.[0]);
+
     if (guess) {
       try {
         const abnRes = await fetch(`${abnEndpoint}?search=${encodeURIComponent(guess)}`);
         if (abnRes.ok) {
           const abnData = await abnRes.json();
-          abn_lookup = abnData.abn_lookup || null;
+          abn_lookup = abnData.abn_lookup || abnData.result || null;
         }
       } catch (err) {
         console.warn('ABN lookup failed:', err.message);
