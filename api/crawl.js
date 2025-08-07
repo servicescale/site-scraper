@@ -1,10 +1,13 @@
-export default async function handler(req, res) {
+const fetch = require('node-fetch');
+
+module.exports = async function handler(req, res) {
   const startUrl = req.query.url;
   if (!startUrl || !/^https?:\/\//i.test(startUrl)) {
     return res.status(400).json({ error: 'Invalid URL' });
   }
 
   const scrapeEndpoint = `${req.headers.host.startsWith('localhost') ? 'http' : 'https'}://${req.headers.host}/api/scrape`;
+  const abnEndpoint = `${req.headers.host.startsWith('localhost') ? 'http' : 'https'}://${req.headers.host}/api/lookup-abn`;
 
   async function scrapePage(url) {
     const res = await fetch(`${scrapeEndpoint}?url=${encodeURIComponent(url)}`);
@@ -16,6 +19,7 @@ export default async function handler(req, res) {
   const pages = [];
   let social_links = {};
   let menu_links = [];
+  let abn_lookup = null;
 
   try {
     const root = await scrapePage(startUrl);
@@ -23,6 +27,20 @@ export default async function handler(req, res) {
     pages.push(root.page);
     social_links = { ...social_links, ...root.social_links };
     menu_links = root.menu_links.filter(link => link.startsWith(startUrl));
+
+    // Try to infer a business name from homepage title or H1
+    const guess = root.page.title || root.page.headings?.[0];
+    if (guess) {
+      try {
+        const abnRes = await fetch(`${abnEndpoint}?search=${encodeURIComponent(guess)}`);
+        if (abnRes.ok) {
+          const abnData = await abnRes.json();
+          abn_lookup = abnData.abn_lookup || null;
+        }
+      } catch (err) {
+        console.warn('ABN lookup failed:', err.message);
+      }
+    }
 
     for (const link of menu_links) {
       if (visited.has(link)) continue;
@@ -40,7 +58,8 @@ export default async function handler(req, res) {
       site: startUrl,
       pages,
       menu_links,
-      social_links
+      social_links,
+      abn_lookup
     });
   } catch (err) {
     res.status(500).json({ error: err.message || 'Crawl failed' });
