@@ -13,8 +13,9 @@ export default async function handler(req, res) {
 
     const images = new Set();
     const links = new Set();
-    const cssTokens = new Set();
+    const headings = [];
     const text = [];
+    const menuLinks = [];
     const socialLinks = {};
 
     const SOCIAL_DOMAINS = {
@@ -27,9 +28,29 @@ export default async function handler(req, res) {
       x: 'x.com'
     };
 
-    const rawHtml = $.html();
+    // Extract menu links (nav > a)
+    $('nav a, header a').each((_, el) => {
+      const href = $(el).attr('href');
+      if (href && !href.startsWith('#')) {
+        try {
+          const full = new URL(href, base).href;
+          menuLinks.push(full);
+        } catch {}
+      }
+    });
 
-    // ✅ Extract images
+    // Headings and paragraph text
+    $('h1,h2,h3,h4,h5,h6').each((_, el) => {
+      const content = $(el).text().trim();
+      if (content.length > 0) headings.push(content);
+    });
+
+    $('p,li').each((_, el) => {
+      const content = $(el).text().trim();
+      if (content.length > 0) text.push(content);
+    });
+
+    // Image URLs
     $('img').each((_, el) => {
       const src = $(el).attr('src') || $(el).attr('data-src');
       if (src) {
@@ -49,16 +70,7 @@ export default async function handler(req, res) {
       }
     });
 
-    // ✅ Extract text content
-    $('h1,h2,h3,h4,h5,h6,p,li').each((_, el) => {
-      const tag = el.tagName;
-      const content = $(el).text().trim();
-      if (content.length > 0) {
-        text.push({ tag, text: content });
-      }
-    });
-
-    // ✅ Extract all links and social profiles
+    // Anchor links + social detection
     $('a').each((_, el) => {
       const href = $(el).attr('href');
       if (href) {
@@ -74,41 +86,18 @@ export default async function handler(req, res) {
       }
     });
 
-    // ✅ Extract CSS colors from inline styles
-    $('[style]').each((_, el) => {
-      const style = $(el).attr('style') || '';
-      for (const match of style.matchAll(/#[a-f0-9]{3,6}/gi)) {
-        cssTokens.add(match[0].toLowerCase());
-      }
-    });
-
-    // ✅ Extract CSS colors from external stylesheets
-    const cssPromises = [];
-    $('link[rel="stylesheet"]').each((_, el) => {
-      const href = $(el).attr('href');
-      if (href) {
-        try {
-          const cssUrl = new URL(href, base).href;
-          cssPromises.push(fetch(cssUrl).then(r => r.text()));
-        } catch {}
-      }
-    });
-
-    const cssContents = await Promise.all(cssPromises);
-    cssContents.forEach(css => {
-      for (const match of css.matchAll(/#[a-f0-9]{3,6}/gi)) {
-        cssTokens.add(match[0].toLowerCase());
-      }
-    });
-
-    // ✅ Return LLM-ready structured output
+    // Final output
     res.status(200).json({
-      html: rawHtml,
-      images: Array.from(images),
-      links: Array.from(links),
-      text,
-      css_tokens: Array.from(cssTokens).slice(0, 10),
-      social_links: socialLinks
+      page: {
+        url,
+        title: $('title').text().trim(),
+        headings,
+        text,
+        images: Array.from(images),
+        links: Array.from(links)
+      },
+      social_links: socialLinks,
+      menu_links: Array.from(new Set(menuLinks))
     });
 
   } catch (err) {
