@@ -1,6 +1,6 @@
 const fetch = require('node-fetch');
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   const startUrl = req.query.url;
   if (!startUrl || !/^https?:\/\//i.test(startUrl)) {
     return res.status(400).json({ error: 'Invalid URL' });
@@ -47,4 +47,4 @@ export default async function handler(req, res) {
   } catch (err) {
     res.status(500).json({ error: err.message || 'Crawl failed' });
   }
-}
+};
