@@ -1,3 +1,5 @@
+const fetch = require('node-fetch');
+
 module.exports = async function handler(req, res) {
   const startUrl = req.query.url;
   if (!startUrl || !/^https?:\/\//i.test(startUrl)) {
@@ -26,9 +28,16 @@ module.exports = async function handler(req, res) {
     social_links = { ...social_links, ...root.social_links };
     menu_links = root.menu_links.filter(link => link.startsWith(startUrl));
 
-    // Check for ABN in page content
-    const abnMatch = root.html.match(/\b\d{2}[ ]?\d{3}[ ]?\d{3}[ ]?\d{3}\b/);
-    const guess = abnMatch ? abnMatch[0].replace(/\s+/g, '') : (root.page.title || root.page.headings?.[0]);
+    // ✅ Safe ABN lookup
+    let guess = root.page.title || root.page.headings?.[0] || null;
+    try {
+      const abnMatch = (root.html && typeof root.html === 'string') ? root.html.match(/\b\d{2}[ ]?\d{3}[ ]?\d{3}[ ]?\d{3}\b/) : null;
+      if (abnMatch) {
+        guess = abnMatch[0].replace(/\s+/g, '');
+      }
+    } catch (err) {
+      console.warn('ABN pattern match failed:', err.message);
+    }
 
     if (guess) {
       try {
