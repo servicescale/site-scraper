@@ -87,7 +87,7 @@ module.exports = async function handler(req, res) {
       .replace(/\./g, '')
       .toLowerCase();
 
-    const bostonosPath = `mk4/capsules/profile_generator/data/profiles/${slug}_raw.json`;
+    const bostonosPath = `/tradecard/mk4/capsules/profile_generator/data/profiles/${slug}_raw.json`;
 
     const saveRes = await fetch(BOSTONOS_API_URL, {
       method: 'POST',
