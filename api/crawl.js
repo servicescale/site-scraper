@@ -1,6 +1,5 @@
 
 // BostonOS API details — token must be set in Vercel Environment Variables
-const BOSTONOS_API_URL = 'https://bostonos-runtime-api.yellow-rice-fbef.workers.dev/writeFile';
 const BOSTONOS_API_TOKEN = process.env.BOSTONOS_API_TOKEN; // Set in Vercel → Settings → Environment Variables
 
 module.exports = async function handler(req, res) {
@@ -76,7 +75,7 @@ module.exports = async function handler(req, res) {
       abn_lookup
     };
 
-    // 📌 Save to BostonOS — EXACT format from ChatGPT custom action
+    // 📌 Save to BostonOS using path-based API per OpenAPI spec
     if (!BOSTONOS_API_TOKEN) {
       return res.status(500).json({ error: 'Missing BOSTONOS_API_TOKEN' });
     }
@@ -89,19 +88,16 @@ module.exports = async function handler(req, res) {
 
     const bostonosKey = `mk4/capsules/profile_generator/data/profiles/${slug}_raw.json`;
 
-    const savePayload = {
-      bucket: 'tradecard', // ✅ exact bucket name
-      key: bostonosKey,    // ✅ path inside the bucket
-      content: JSON.stringify(crawlResult) // ✅ stringify JSON for content
-    };
-
-    const saveRes = await fetch(BOSTONOS_API_URL, {
+    const saveRes = await fetch(`https://bostonos-runtime-api.yellow-rice-fbef.workers.dev/tradecard/file`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${BOSTONOS_API_TOKEN}` // ✅ Bearer token exactly as used in custom action
+        'Authorization': `Bearer ${BOSTONOS_API_TOKEN}`
       },
-      body: JSON.stringify(savePayload)
+      body: JSON.stringify({
+        key: bostonosKey,
+        content: JSON.stringify(crawlResult)
+      })
     });
 
     if (!saveRes.ok) {
