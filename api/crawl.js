@@ -1,3 +1,8 @@
+
+// BostonOS API details — token must be set in Vercel Environment Variables
+const BOSTONOS_API_URL = 'https://bostonos-runtime-api.yellow-rice-fbef.workers.dev/writeFile';
+const BOSTONOS_API_TOKEN = process.env.BOSTONOS_API_TOKEN; // Set in Vercel → Settings → Environment Variables
+
 module.exports = async function handler(req, res) {
   const startUrl = req.query.url;
   if (!startUrl || !/^https?:\/\//i.test(startUrl)) {
@@ -26,10 +31,12 @@ module.exports = async function handler(req, res) {
     social_links = { ...social_links, ...root.social_links };
     menu_links = root.menu_links.filter(link => link.startsWith(startUrl));
 
-    // ✅ Safe ABN lookup
+    // ✅ ABN lookup
     let guess = root.page.title || root.page.headings?.[0] || null;
     try {
-      const abnMatch = (root.html && typeof root.html === 'string') ? root.html.match(/\b\d{2}[ ]?\d{3}[ ]?\d{3}[ ]?\d{3}\b/) : null;
+      const abnMatch = (root.html && typeof root.html === 'string')
+        ? root.html.match(/\b\d{2}[ ]?\d{3}[ ]?\d{3}[ ]?\d{3}\b/)
+        : null;
       if (abnMatch) {
         guess = abnMatch[0].replace(/\s+/g, '');
       }
@@ -61,14 +68,50 @@ module.exports = async function handler(req, res) {
       }
     }
 
-    res.status(200).json({
+    const crawlResult = {
       site: startUrl,
       pages,
       menu_links,
       social_links,
       abn_lookup
+    };
+
+    // 📌 Save to BostonOS
+    if (!BOSTONOS_API_TOKEN) {
+      return res.status(500).json({ error: 'Missing BOSTONOS_API_TOKEN' });
+    }
+
+    const slug = new URL(startUrl)
+      .hostname
+      .replace(/^www\./, '')
+      .replace(/\./g, '')
+      .toLowerCase();
+
+    const bostonosPath = `mk4/capsules/profile_generator/data/profiles/${slug}_raw.json`;
+
+    const saveRes = await fetch(BOSTONOS_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${BOSTONOS_API_TOKEN}`
+      },
+      body: JSON.stringify({
+        bucket: 'tradecard',
+        key: bostonosPath,
+        content: JSON.stringify(crawlResult)
+      })
     });
+
+    if (!saveRes.ok) {
+      return res.status(500).json({ error: `Failed to save to BostonOS: ${await saveRes.text()}` });
+    }
+
+    console.log(`✅ Saved raw crawl to BostonOS as ${bostonosPath}`);
+
+    // Return ONLY the BostonOS storage path
+    return res.status(200).json({ saved_to_bostonos: bostonosPath });
+
   } catch (err) {
-    res.status(500).json({ error: err.message || 'Crawl failed' });
+    return res.status(500).json({ error: err.message || 'Crawl failed' });
   }
 };
