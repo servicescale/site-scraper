@@ -76,7 +76,7 @@ module.exports = async function handler(req, res) {
       abn_lookup
     };
 
-    // 📌 Save to BostonOS
+    // 📌 Save to BostonOS — EXACT format from ChatGPT custom action
     if (!BOSTONOS_API_TOKEN) {
       return res.status(500).json({ error: 'Missing BOSTONOS_API_TOKEN' });
     }
@@ -87,29 +87,31 @@ module.exports = async function handler(req, res) {
       .replace(/\./g, '')
       .toLowerCase();
 
-    const bostonosPath = `/tradecard/mk4/capsules/profile_generator/data/profiles/${slug}_raw.json`;
+    const bostonosKey = `mk4/capsules/profile_generator/data/profiles/${slug}_raw.json`;
+
+    const savePayload = {
+      bucket: 'tradecard', // ✅ exact bucket name
+      key: bostonosKey,    // ✅ path inside the bucket
+      content: JSON.stringify(crawlResult) // ✅ stringify JSON for content
+    };
 
     const saveRes = await fetch(BOSTONOS_API_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${BOSTONOS_API_TOKEN}`
+        'Authorization': `Bearer ${BOSTONOS_API_TOKEN}` // ✅ Bearer token exactly as used in custom action
       },
-      body: JSON.stringify({
-        bucket: 'tradecard',
-        key: bostonosPath,
-        content: JSON.stringify(crawlResult)
-      })
+      body: JSON.stringify(savePayload)
     });
 
     if (!saveRes.ok) {
-      return res.status(500).json({ error: `Failed to save to BostonOS: ${await saveRes.text()}` });
+      const errText = await saveRes.text();
+      console.error('❌ BostonOS save failed:', errText);
+      return res.status(500).json({ error: `Failed to save to BostonOS: ${errText}` });
     }
 
-    console.log(`✅ Saved raw crawl to BostonOS as ${bostonosPath}`);
-
-    // Return ONLY the BostonOS storage path
-    return res.status(200).json({ saved_to_bostonos: bostonosPath });
+    console.log(`✅ Saved raw crawl to BostonOS: ${bostonosKey}`);
+    return res.status(200).json({ saved_to_bostonos: bostonosKey });
 
   } catch (err) {
     return res.status(500).json({ error: err.message || 'Crawl failed' });
