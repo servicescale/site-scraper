@@ -23,10 +23,8 @@ module.exports = async function handler(req, res) {
       for (const tag of linkMatches) {
         const hrefMatch = tag.match(/href=["']([^"']+)["']/i);
         if (hrefMatch) {
-          const href = hrefMatch[1];
           try {
-            const absoluteUrl = new URL(href, url).href;
-            cssLinks.push(absoluteUrl);
+            cssLinks.push(new URL(hrefMatch[1], url).href);
           } catch {}
         }
       }
@@ -40,12 +38,36 @@ module.exports = async function handler(req, res) {
 
   async function fetchCSSColorsFromText(cssText, aggregated) {
     const skipColors = ['#000', '#000000', '#fff', '#ffffff', '#111', '#222', '#333'];
+    const colorVarMap = {};
+    const varMatches = cssText.match(/--[\w-]+:\s*([^;]+)/gi) || [];
+    for (const match of varMatches) {
+      const [name, value] = match.split(/:\s*/);
+      if (name && value) {
+        colorVarMap[name.trim()] = value.trim();
+      }
+    }
+
     const lines = cssText.split(/;|\n/);
     for (const line of lines) {
-      const colorMatch = line.match(/(#[a-f0-9]{3,6}|rgba?\([^\)]+\)|hsla?\([^\)]+\))/i);
+      let colorMatch = line.match(/(#[a-f0-9]{3,6}|rgba?\([^\)]+\)|hsla?\([^\)]+\)|var\([^\)]+\))/i);
       if (!colorMatch) continue;
-      const color = colorMatch[0].toLowerCase();
+
+      let color = colorMatch[0].toLowerCase();
+
+      if (color.startsWith('var(')) {
+        const varName = color.replace(/var\(|\)/g, '').trim();
+        if (colorVarMap[varName]) {
+          color = colorVarMap[varName];
+        }
+      }
+
+      const nestedVarMatch = color.match(/var\(([^\)]+)\)/);
+      if (nestedVarMatch && colorVarMap[nestedVarMatch[1]]) {
+        color = color.replace(/var\([^\)]+\)/, colorVarMap[nestedVarMatch[1]]);
+      }
+
       if (skipColors.includes(color)) continue;
+
       if (/color:/i.test(line) && !/background/i.test(line)) {
         aggregated.text[color] = (aggregated.text[color] || 0) + 1;
       } else if (/background/i.test(line)) {
