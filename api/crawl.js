@@ -1,3 +1,82 @@
+const { JSDOM } = require('jsdom');
+
+const scrapePage = async (url, scrapeEndpoint) => {
+  const res = await fetch(`${scrapeEndpoint}?url=${encodeURIComponent(url)}`);
+  if (!res.ok) throw new Error(`Scrape failed: ${url}`);
+  return res.json();
+};
+
+const extractCSSLinksAndInline = async (url) => {
+  const cssLinks = [];
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return cssLinks;
+    const html = await res.text();
+    const linkMatches = html.match(/<link[^>]+rel=["']stylesheet["'][^>]*>/gi) || [];
+    for (const tag of linkMatches) {
+      const hrefMatch = tag.match(/href=["']([^"']+)["']/i);
+      if (hrefMatch) {
+        try {
+          cssLinks.push(new URL(hrefMatch[1], url).href);
+        } catch {}
+      }
+    }
+    const styleMatches = html.match(/<style[^>]*>([\s\S]*?)<\/style>/gi) || [];
+    if (styleMatches.length > 0) {
+      cssLinks.push(...styleMatches.map(s => s.replace(/<\/?style[^>]*>/gi, '')));
+    }
+  } catch {}
+  return cssLinks;
+};
+
+const normalizeToHex = (color) => {
+  try {
+    const dom = new JSDOM('<!DOCTYPE html><html><body></body></html>');
+    const ctx = dom.window.document.createElement('canvas').getContext('2d');
+    ctx.fillStyle = color;
+    return ctx.fillStyle;
+  } catch {
+    return color;
+  }
+};
+
+const fetchCSSColorsFromText = (cssText, aggregated) => {
+  const skipColors = ['#000000', '#ffffff', '#111111', '#222222', '#333333'];
+  const colorVarMap = {};
+  const varMatches = cssText.match(/--[\w-]+:\s*([^;]+)/gi) || [];
+  for (const match of varMatches) {
+    const [name, value] = match.split(/:\s*/);
+    if (name && value) {
+      colorVarMap[name.trim()] = value.trim();
+    }
+  }
+  const lines = cssText.split(/;|\n/);
+  for (const line of lines) {
+    let colorMatch = line.match(/(#[a-f0-9]{3,6}|rgba?\([^\)]+\)|hsla?\([^\)]+\)|var\([^\)]+\))/i);
+    if (!colorMatch) continue;
+    let color = colorMatch[0].toLowerCase();
+    if (color.startsWith('var(')) {
+      const varName = color.replace(/var\(|\)/g, '').trim();
+      if (colorVarMap[varName]) {
+        color = colorVarMap[varName];
+      }
+    }
+    const nestedVarMatch = color.match(/var\(([^\)]+)\)/);
+    if (nestedVarMatch && colorVarMap[nestedVarMatch[1]]) {
+      color = color.replace(/var\([^\)]+\)/, colorVarMap[nestedVarMatch[1]]);
+    }
+    color = normalizeToHex(color);
+    if (skipColors.includes(color)) continue;
+    if (/color:/i.test(line) && !/background/i.test(line)) {
+      aggregated.text[color] = (aggregated.text[color] || 0) + 1;
+    } else if (/background/i.test(line)) {
+      aggregated.background[color] = (aggregated.background[color] || 0) + 1;
+    } else if (/border|outline/i.test(line)) {
+      aggregated.accents[color] = (aggregated.accents[color] || 0) + 1;
+    }
+  }
+};
+
 module.exports = async function handler(req, res) {
   const startUrl = req.query.url;
   if (!startUrl || !/^https?:\/\//i.test(startUrl)) {
@@ -7,77 +86,6 @@ module.exports = async function handler(req, res) {
   const scrapeEndpoint = `${req.headers.host.startsWith('localhost') ? 'http' : 'https'}://${req.headers.host}/api/scrape`;
   const abnEndpoint = `${req.headers.host.startsWith('localhost') ? 'http' : 'https'}://${req.headers.host}/api/lookup-abn`;
 
-  async function scrapePage(url) {
-    const res = await fetch(`${scrapeEndpoint}?url=${encodeURIComponent(url)}`);
-    if (!res.ok) throw new Error(`Scrape failed: ${url}`);
-    return res.json();
-  }
-
-  async function extractCSSLinksAndInline(url) {
-    const cssLinks = [];
-    try {
-      const res = await fetch(url);
-      if (!res.ok) return cssLinks;
-      const html = await res.text();
-      const linkMatches = html.match(/<link[^>]+rel=["']stylesheet["'][^>]*>/gi) || [];
-      for (const tag of linkMatches) {
-        const hrefMatch = tag.match(/href=["']([^"']+)["']/i);
-        if (hrefMatch) {
-          try {
-            cssLinks.push(new URL(hrefMatch[1], url).href);
-          } catch {}
-        }
-      }
-      const styleMatches = html.match(/<style[^>]*>([\s\S]*?)<\/style>/gi) || [];
-      if (styleMatches.length > 0) {
-        cssLinks.push(...styleMatches.map(s => s.replace(/<\/?style[^>]*>/gi, '')));
-      }
-    } catch {}
-    return cssLinks;
-  }
-
-  async function fetchCSSColorsFromText(cssText, aggregated) {
-    const skipColors = ['#000', '#000000', '#fff', '#ffffff', '#111', '#222', '#333'];
-    const colorVarMap = {};
-    const varMatches = cssText.match(/--[\w-]+:\s*([^;]+)/gi) || [];
-    for (const match of varMatches) {
-      const [name, value] = match.split(/:\s*/);
-      if (name && value) {
-        colorVarMap[name.trim()] = value.trim();
-      }
-    }
-
-    const lines = cssText.split(/;|\n/);
-    for (const line of lines) {
-      let colorMatch = line.match(/(#[a-f0-9]{3,6}|rgba?\([^\)]+\)|hsla?\([^\)]+\)|var\([^\)]+\))/i);
-      if (!colorMatch) continue;
-
-      let color = colorMatch[0].toLowerCase();
-
-      if (color.startsWith('var(')) {
-        const varName = color.replace(/var\(|\)/g, '').trim();
-        if (colorVarMap[varName]) {
-          color = colorVarMap[varName];
-        }
-      }
-
-      const nestedVarMatch = color.match(/var\(([^\)]+)\)/);
-      if (nestedVarMatch && colorVarMap[nestedVarMatch[1]]) {
-        color = color.replace(/var\([^\)]+\)/, colorVarMap[nestedVarMatch[1]]);
-      }
-
-      if (skipColors.includes(color)) continue;
-
-      if (/color:/i.test(line) && !/background/i.test(line)) {
-        aggregated.text[color] = (aggregated.text[color] || 0) + 1;
-      } else if (/background/i.test(line)) {
-        aggregated.background[color] = (aggregated.background[color] || 0) + 1;
-      } else if (/border|outline/i.test(line)) {
-        aggregated.accents[color] = (aggregated.accents[color] || 0) + 1;
-      }
-    }
-  }
-
   const visited = new Set();
   const pages = [];
   let social_links = {};
@@ -86,7 +94,7 @@ module.exports = async function handler(req, res) {
   let primary_colors = { text: [], background: [], accents: [] };
 
   try {
-    const root = await scrapePage(startUrl);
+    const root = await scrapePage(startUrl, scrapeEndpoint);
     visited.add(root.page.url);
     pages.push(root.page);
     social_links = { ...social_links, ...root.social_links };
@@ -123,11 +131,11 @@ module.exports = async function handler(req, res) {
           const cssRes = await fetch(source);
           if (cssRes.ok) {
             const cssText = await cssRes.text();
-            await fetchCSSColorsFromText(cssText, aggregated);
+            fetchCSSColorsFromText(cssText, aggregated);
           }
         } catch {}
       } else {
-        await fetchCSSColorsFromText(source, aggregated);
+        fetchCSSColorsFromText(source, aggregated);
       }
     }
 
@@ -140,7 +148,7 @@ module.exports = async function handler(req, res) {
     for (const link of menu_links) {
       if (visited.has(link)) continue;
       try {
-        const pageData = await scrapePage(link);
+        const pageData = await scrapePage(link, scrapeEndpoint);
         pages.push(pageData.page);
         visited.add(pageData.page.url);
         social_links = { ...social_links, ...pageData.social_links };
@@ -149,14 +157,7 @@ module.exports = async function handler(req, res) {
       }
     }
 
-    res.status(200).json({
-      site: startUrl,
-      pages,
-      menu_links,
-      social_links,
-      abn_lookup,
-      primary_colors
-    });
+    res.status(200).json({ site: startUrl, pages, menu_links, social_links, abn_lookup, primary_colors });
   } catch (err) {
     res.status(500).json({ error: err.message || 'Crawl failed' });
   }
