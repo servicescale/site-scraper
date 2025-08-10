@@ -32,10 +32,16 @@ const extractCSSLinksAndInline = async (url) => {
 const normalizeToHex = (color) => {
   try {
     const dom = new JSDOM('<!DOCTYPE html><html><body></body></html>');
-    const ctx = dom.window.document.createElement('canvas').getContext('2d');
+    const canvas = dom.window.document.createElement('canvas');
+    if (!canvas || !canvas.getContext) {
+      console.warn('Canvas API not available, skipping color normalization');
+      return color;
+    }
+    const ctx = canvas.getContext('2d');
     ctx.fillStyle = color;
     return ctx.fillStyle;
-  } catch {
+  } catch (err) {
+    console.warn('normalizeToHex failed:', err.message);
     return color;
   }
 };
