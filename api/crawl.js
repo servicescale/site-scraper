@@ -1,7 +1,3 @@
-
-// BostonOS API details — token must be set in Vercel Environment Variables
-const BOSTONOS_API_TOKEN = process.env.BOSTONOS_API_TOKEN; // Set in Vercel → Settings → Environment Variables
-
 module.exports = async function handler(req, res) {
   const startUrl = req.query.url;
   if (!startUrl || !/^https?:\/\//i.test(startUrl)) {
@@ -17,11 +13,41 @@ module.exports = async function handler(req, res) {
     return res.json();
   }
 
+  async function fetchCSSColors(url) {
+    const categories = { text: {}, background: {}, accents: {} };
+    const skipColors = ['#000', '#000000', '#fff', '#ffffff', '#111', '#222', '#333'];
+    try {
+      const cssRes = await fetch(url);
+      if (!cssRes.ok) return categories;
+      const cssText = await cssRes.text();
+
+      const lines = cssText.split(/;|\n/);
+      for (const line of lines) {
+        const colorMatch = line.match(/#[a-f0-9]{3,6}/i);
+        if (!colorMatch) continue;
+        const color = colorMatch[0].toLowerCase();
+        if (skipColors.includes(color)) continue;
+
+        if (/color:/i.test(line) && !/background/i.test(line)) {
+          categories.text[color] = (categories.text[color] || 0) + 1;
+        } else if (/background/i.test(line)) {
+          categories.background[color] = (categories.background[color] || 0) + 1;
+        } else if (/border|outline/i.test(line)) {
+          categories.accents[color] = (categories.accents[color] || 0) + 1;
+        }
+      }
+    } catch {
+      return categories;
+    }
+    return categories;
+  }
+
   const visited = new Set();
   const pages = [];
   let social_links = {};
   let menu_links = [];
   let abn_lookup = null;
+  let primary_colors = { text: [], background: [], accents: [] };
 
   try {
     const root = await scrapePage(startUrl);
@@ -30,12 +56,10 @@ module.exports = async function handler(req, res) {
     social_links = { ...social_links, ...root.social_links };
     menu_links = root.menu_links.filter(link => link.startsWith(startUrl));
 
-    // ✅ ABN lookup
+    // ✅ Safe ABN lookup
     let guess = root.page.title || root.page.headings?.[0] || null;
     try {
-      const abnMatch = (root.html && typeof root.html === 'string')
-        ? root.html.match(/\b\d{2}[ ]?\d{3}[ ]?\d{3}[ ]?\d{3}\b/)
-        : null;
+      const abnMatch = (root.html && typeof root.html === 'string') ? root.html.match(/\b\d{2}[ ]?\d{3}[ ]?\d{3}[ ]?\d{3}\b/) : null;
       if (abnMatch) {
         guess = abnMatch[0].replace(/\s+/g, '');
       }
@@ -55,6 +79,25 @@ module.exports = async function handler(req, res) {
       }
     }
 
+    // ✅ Fetch CSS colors from linked stylesheets and categorize
+    if (root.page.links) {
+      const cssLinks = root.page.links.filter(l => l.endsWith('.css'));
+      const aggregated = { text: {}, background: {}, accents: {} };
+      for (const cssUrl of cssLinks) {
+        const categories = await fetchCSSColors(cssUrl);
+        for (const cat of Object.keys(categories)) {
+          for (const color in categories[cat]) {
+            aggregated[cat][color] = (aggregated[cat][color] || 0) + categories[cat][color];
+          }
+        }
+      }
+      primary_colors = {
+        text: Object.keys(aggregated.text).sort((a, b) => aggregated.text[b] - aggregated.text[a]).slice(0, 3),
+        background: Object.keys(aggregated.background).sort((a, b) => aggregated.background[b] - aggregated.background[a]).slice(0, 3),
+        accents: Object.keys(aggregated.accents).sort((a, b) => aggregated.accents[b] - aggregated.accents[a]).slice(0, 3)
+      };
+    }
+
     for (const link of menu_links) {
       if (visited.has(link)) continue;
       try {
@@ -67,49 +110,15 @@ module.exports = async function handler(req, res) {
       }
     }
 
-    const crawlResult = {
+    res.status(200).json({
       site: startUrl,
       pages,
       menu_links,
       social_links,
-      abn_lookup
-    };
-
-    // 📌 Save to BostonOS using path-based API per OpenAPI spec
-    if (!BOSTONOS_API_TOKEN) {
-      return res.status(500).json({ error: 'Missing BOSTONOS_API_TOKEN' });
-    }
-
-    const slug = new URL(startUrl)
-      .hostname
-      .replace(/^www\./, '')
-      .replace(/\./g, '')
-      .toLowerCase();
-
-    const bostonosKey = `mk4/capsules/profile_generator/data/profiles/${slug}_raw.json`;
-
-    const saveRes = await fetch(`https://bostonos-runtime-api.yellow-rice-fbef.workers.dev/tradecard/file`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${BOSTONOS_API_TOKEN}`
-      },
-      body: JSON.stringify({
-        key: bostonosKey,
-        content: JSON.stringify(crawlResult)
-      })
+      abn_lookup,
+      primary_colors
     });
-
-    if (!saveRes.ok) {
-      const errText = await saveRes.text();
-      console.error('❌ BostonOS save failed:', errText);
-      return res.status(500).json({ error: `Failed to save to BostonOS: ${errText}` });
-    }
-
-    console.log(`✅ Saved raw crawl to BostonOS: ${bostonosKey}`);
-    return res.status(200).json({ saved_to_bostonos: bostonosKey });
-
   } catch (err) {
-    return res.status(500).json({ error: err.message || 'Crawl failed' });
+    res.status(500).json({ error: err.message || 'Crawl failed' });
   }
 };
