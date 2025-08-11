@@ -18,15 +18,18 @@ export default async function handler(req, res) {
     const menuLinks = [];
     const socialLinks = {};
 
-    const SOCIAL_DOMAINS = {
-      facebook: 'facebook.com',
-      instagram: 'instagram.com',
-      linkedin: 'linkedin.com',
-      youtube: 'youtube.com',
-      tiktok: 'tiktok.com',
-      twitter: 'twitter.com',
-      x: 'x.com'
-    };
+    // Expanded social domains
+const SOCIAL_DOMAINS = {
+  facebook: ['facebook.com', 'm.facebook.com'],
+  instagram: ['instagram.com'],
+  linkedin: ['linkedin.com'],
+  youtube: ['youtube.com', 'm.youtube.com'],
+  youtu: ['youtu.be'],
+  tiktok: ['tiktok.com'],
+  twitter: ['twitter.com', 'mobile.twitter.com'],
+  x: ['x.com'],
+  pinterest: ['pinterest.com']
+};
 
     // Extract menu links (nav > a)
     $('nav a, header a').each((_, el) => {
@@ -71,15 +74,22 @@ export default async function handler(req, res) {
     });
 
     // Anchor links + social detection
-    $('a').each((_, el) => {
+    $('a[href]').each((_, el) => {
       const href = $(el).attr('href');
       if (href) {
         try {
           const full = new URL(href, base).href;
           links.add(full);
-          for (const [platform, domain] of Object.entries(SOCIAL_DOMAINS)) {
-            if (full.includes(domain)) {
-              socialLinks[platform] = full;
+
+          // Normalise URL (remove tracking params/fragments)
+          const cleanUrl = full.split('?')[0].split('#')[0];
+
+          // Detect platform
+          for (const [platform, domains] of Object.entries(SOCIAL_DOMAINS)) {
+            if (domains.some(domain => cleanUrl.includes(domain))) {
+              if (!socialLinks[platform]) {
+                socialLinks[platform] = cleanUrl;
+              }
             }
           }
         } catch {}
