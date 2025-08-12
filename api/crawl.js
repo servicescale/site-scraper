@@ -16,6 +16,16 @@ module.exports = async function handler(req, res) {
     return res.json();
   }
 
+  // 🔹 New helper to prevent overwriting populated socials with empty values
+  function mergeSocialLinks(target, source) {
+    for (const [platform, url] of Object.entries(source || {})) {
+      if (url && !target[platform]) {
+        target[platform] = url;
+      }
+    }
+    return target;
+  }
+
   const visited = new Set();
   const pages = [];
   let social_links = {};
@@ -27,7 +37,7 @@ module.exports = async function handler(req, res) {
     const root = await scrapePage(startUrl);
     visited.add(root.page.url);
     pages.push(root.page);
-    social_links = { ...social_links, ...root.social_links };
+    social_links = mergeSocialLinks(social_links, root.social_links);
     menu_links = root.menu_links.filter(link => link.startsWith(startUrl));
 
     // ABN lookup
@@ -62,7 +72,7 @@ module.exports = async function handler(req, res) {
         const pageData = await scrapePage(link);
         pages.push(pageData.page);
         visited.add(pageData.page.url);
-        social_links = { ...social_links, ...pageData.social_links };
+        social_links = mergeSocialLinks(social_links, pageData.social_links);
       } catch (err) {
         console.warn(`⚠️ Failed to scrape ${link}:`, err.message);
       }
